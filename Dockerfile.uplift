@@ -1,0 +1,37 @@
+# syntax=docker/dockerfile:1
+FROM alpine:3.22 AS source
+ADD --checksum=sha256:26e1681ed3f178f52fe5a524e55855aee15842cde3e72ec782e55ae6fde36191 https://codeload.github.com/anthropics/uplifting-biomolecular-modeling/tar.gz/f4f62fa6592ae4938d49b1757bea0cfeff9f468e /tmp/source.tar.gz
+RUN mkdir /source && tar -xzf /tmp/source.tar.gz -C /source --strip-components=1
+
+FROM mambaorg/micromamba:2.1.1
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential ca-certificates wget git bzip2 ocl-icd-libopencl1 clinfo time \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /etc/OpenCL/vendors \
+    && echo libnvidia-opencl.so.1 > /etc/OpenCL/vendors/nvidia.icd
+ENV PATH=/opt/conda/bin:/opt/conda/condabin:${PATH} \
+    LD_LIBRARY_PATH=/opt/conda/lib PYTHONHASHSEED=0 PYTHONUNBUFFERED=1 \
+    LANG=C.UTF-8 LC_ALL=C.UTF-8 MAMBA_DOCKERFILE_ACTIVATE=1 \
+    BINDCRAFT_HOME=/app COLABDESIGN_PARAMS_DIR=/models/af2 \
+    OPENMM_PLATFORM_ORDER=OpenCL,CUDA OPENMM_DEFAULT_PLATFORM=OpenCL
+ARG MAMBA_DOCKERFILE_ACTIVATE=1
+COPY --from=source /source/common/opt_core /kit/common/opt_core
+COPY --from=source /source/colabdesign /kit/colabdesign
+COPY --from=source /source/LICENSE /source/NOTICE /kit/
+COPY optimizations/install.sh /tmp/install-uplift.sh
+RUN bash /tmp/install-uplift.sh /kit
+COPY . /app
+RUN chmod +x /app/functions/dssp /app/functions/sc /app/functions/FASPR \
+    && mkdir -p /models/af2 /work /jit \
+    && ln -s /models/af2/params /app/params \
+    && test -s /app/functions/dun2010bbdep.bin
+RUN python /app/optimizations/check_image.py
+ARG FREEBINDCRAFT_REVISION=local
+ENV FREEBINDCRAFT_REVISION=${FREEBINDCRAFT_REVISION}
+LABEL org.opencontainers.image.source="https://github.com/Poko18/FreeBindCraft" \
+      org.opencontainers.image.revision=${FREEBINDCRAFT_REVISION} \
+      org.structor.uplift-revision="f4f62fa6592ae4938d49b1757bea0cfeff9f468e"
+WORKDIR /app
+ENTRYPOINT []
+CMD ["python", "optimizations/run.py", "--help"]

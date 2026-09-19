@@ -67,6 +67,10 @@ import contextlib
 import time
 import pathlib
 from itertools import zip_longest
+from optimizations.runtime import (
+    strict, relaxation_seed, missing_atoms, seed_integrator,
+    relaxation_environment, require_backend,
+)
 from .generic_utils import clean_pdb
 from .logging_utils import vprint
 from .biopython_utils import hotspot_residues, biopython_align_all_ca
@@ -151,6 +155,7 @@ def _calculate_shape_complementarity(pdb_file_path, binder_chain="B", target_cha
                 break
 
         if sc_bin is None:
+            require_backend(False, "sc-rs missing")
             # Fallback to placeholder if not found
             vprint(f"[SC-RS] Binary not found; using placeholder value 0.70 for {basename}")
             return 0.70
@@ -168,6 +173,7 @@ def _calculate_shape_complementarity(pdb_file_path, binder_chain="B", target_cha
         )
         stdout = (proc.stdout or '').strip()
         if not stdout:
+            require_backend(False, "sc-rs empty output")
             vprint(f"[SC-RS] Empty output; using placeholder 0.70 for {basename}")
             return 0.70
 
@@ -192,6 +198,8 @@ def _calculate_shape_complementarity(pdb_file_path, binder_chain="B", target_cha
                     if 0.0 <= sc_val <= 1.0:
                         elapsed = time.time() - start_time
                         vprint(f"[SC-RS] Completed for {basename}: SC={sc_val:.2f} in {elapsed:.2f}s")
+                        if strict():
+                            print(f"[freebindcraft-backend] sc-rs value={sc_val}")
                         return sc_val
             except Exception:
                 pass
@@ -203,6 +211,7 @@ def _calculate_shape_complementarity(pdb_file_path, binder_chain="B", target_cha
         print(f"[SC-RS] WARN: Failed to compute SC for {pdb_file_path}: {e}")
 
     # Fallback to placeholder to keep pipelines running
+    require_backend(False, "sc-rs")
     vprint(f"[SC-RS] Fallback placeholder 0.70 for {os.path.basename(pdb_file_path)}")
     return 0.70
 
@@ -457,6 +466,8 @@ def _compute_sasa_metrics_with_freesasa(pdb_file_path, binder_chain="B", target_
 
         elapsed = time.time() - t0
         vprint(f"[SASA-FreeSASA] Completed for {basename} in {elapsed:.2f}s")
+        if strict():
+            print("[freebindcraft-backend] FreeSASA complete")
         return (
             surface_hydrophobicity_fraction,
             binder_sasa_in_complex,
@@ -465,6 +476,8 @@ def _compute_sasa_metrics_with_freesasa(pdb_file_path, binder_chain="B", target_
             target_sasa_monomer,
         )
     except Exception as e_fsasa:
+        if strict():
+            raise RuntimeError("FreeSASA failed") from e_fsasa
         print(f"[FreeSASA] ERROR for {pdb_file_path}: {e_fsasa}")
         return _compute_sasa_metrics(pdb_file_path, binder_chain=binder_chain, target_chain=target_chain)
 
@@ -496,6 +509,7 @@ def pr_alternative_score_interface(pdb_file, binder_chain="B", target_chain="A",
     tuple
         (interface_scores, interface_AA, interface_residues_pdb_ids_str)
     """
+    require_backend(_HAS_FREESASA, "FreeSASA missing")
     t0_all = time.time()
     basename = os.path.basename(pdb_file)
     vprint(f"[Alt-Score] Initiating PyRosetta-free scoring for {basename} (binder={binder_chain}, sasa_engine={sasa_engine})")
@@ -763,6 +777,8 @@ def _run_faspr(input_pdb_path, output_pdb_path, sequence_txt_path=None, timeout=
         proc = subprocess.run(cmd, cwd=faspr_dir, check=True, capture_output=True, text=True, timeout=timeout)
         # Verify output exists and is non-empty
         if os.path.isfile(output_pdb_path) and os.path.getsize(output_pdb_path) > 0:
+            if strict():
+                print("[freebindcraft-backend] FASPR complete")
             return True
     except subprocess.TimeoutExpired:
         print(f"[FASPR] ERROR: Timeout running FASPR on {os.path.basename(input_pdb_path)}")
@@ -789,7 +805,7 @@ def _add_hydrogens_and_minimize(pdb_in_path, pdb_out_path, platform_order=None,
         fixer.replaceNonstandardResidues()
         fixer.removeHeterogens(keepWater=False)
         fixer.findMissingAtoms()
-        fixer.addMissingAtoms()
+        missing_atoms(fixer)
         fixer.addMissingHydrogens(7.0)
 
         forcefield = _get_openmm_forcefield()
@@ -801,6 +817,7 @@ def _add_hydrogens_and_minimize(pdb_in_path, pdb_out_path, platform_order=None,
         integrator = openmm.LangevinMiddleIntegrator(300*unit.kelvin,
                                                      1.0/unit.picosecond,
                                                      0.002*unit.picoseconds)
+        seed_integrator(integrator)
 
         # Platform selection
         plat_used = None
@@ -839,6 +856,8 @@ def _add_hydrogens_and_minimize(pdb_in_path, pdb_out_path, platform_order=None,
         return plat_used, (time.time() - t0)
     except Exception as e:
         print(f"[OpenMM-PostFASPR] WARN: Failed post-FASPR H-add/min: {e}")
+        if strict():
+            raise
         try:
             shutil.copy(pdb_in_path, pdb_out_path)
         except Exception:
@@ -1026,7 +1045,7 @@ def openmm_relax(pdb_file_path, output_pdb_path, use_gpu_relax=True,
         fixer.replaceNonstandardResidues() # This should handle common MODRES
         fixer.removeHeterogens(keepWater=False) # Usually False for relaxation
         fixer.findMissingAtoms()
-        fixer.addMissingAtoms()
+        missing_atoms(fixer)
         fixer.addMissingHydrogens(7.0) # Add hydrogens at neutral pH
         vprint(f"[OpenMM-Relax] PDBFixer processing completed on: {pdb_for_fixer}")
         # Debug: write PDBFixer output
@@ -1085,6 +1104,7 @@ def openmm_relax(pdb_file_path, output_pdb_path, use_gpu_relax=True,
         integrator = openmm.LangevinMiddleIntegrator(300*unit.kelvin, 
                                                   1.0/unit.picosecond, 
                                                   0.002*unit.picoseconds)
+        seed_integrator(integrator)
         
         simulation = None
         platform_name_used = None # To store the name of the successfully used platform
@@ -1242,7 +1262,12 @@ def openmm_relax(pdb_file_path, output_pdb_path, use_gpu_relax=True,
             # MD Shake only for first two ramp stages for speed-performance tradeoff
             if md_steps_per_shake > 0 and i_stage_val < 2:
                 t_md_start = time.time()
-                simulation.context.setVelocitiesToTemperature(300*unit.kelvin) # Reinitialize velocities
+                velocity_seed = relaxation_seed()
+                simulation.context.setVelocitiesToTemperature(
+                    300*unit.kelvin,
+                    **({"randomSeed": (velocity_seed + i_stage_val) % 2147483646 + 1}
+                       if velocity_seed is not None else {}),
+                )
                 simulation.step(md_steps_per_shake)
                 if _stage_metrics is not None:
                     _stage_metrics["md_steps_run"] = int(md_steps_per_shake)
@@ -1357,7 +1382,7 @@ def openmm_relax(pdb_file_path, output_pdb_path, use_gpu_relax=True,
                     fixer_heavy.replaceNonstandardResidues()
                     fixer_heavy.removeHeterogens(keepWater=False)
                     fixer_heavy.findMissingAtoms()
-                    fixer_heavy.addMissingAtoms()
+                    missing_atoms(fixer_heavy)
                     # Intentionally DO NOT add hydrogens here; FASPR ignores sidechains but requires complete backbone
                     with open(tmp_heavy, 'w') as ftmp:
                         app.PDBFile.writeFile(fixer_heavy.topology, fixer_heavy.positions, ftmp, keepIds=True)
@@ -1366,6 +1391,7 @@ def openmm_relax(pdb_file_path, output_pdb_path, use_gpu_relax=True,
                     shutil.copy(output_pdb_path, tmp_heavy)
 
                 faspr_success = _run_faspr(tmp_heavy, tmp_faspr_out)
+                require_backend(faspr_success, "FASPR")
                 faspr_seconds = time.time() - t_faspr
 
                 if faspr_success:
@@ -1373,7 +1399,7 @@ def openmm_relax(pdb_file_path, output_pdb_path, use_gpu_relax=True,
                     if post_faspr_minimize:
                         _, post_min_seconds = _add_hydrogens_and_minimize(
                             tmp_faspr_out, output_pdb_path,
-                            platform_order=['OpenCL', 'CUDA', 'CPU'],
+                            platform_order=(platform_order if strict() else ['OpenCL', 'CUDA', 'CPU']),
                             force_tolerance_kj_mol_nm=openmm_final_force_tolerance_kj_mol_nm,
                             max_iterations=300
                         )
@@ -1386,7 +1412,7 @@ def openmm_relax(pdb_file_path, output_pdb_path, use_gpu_relax=True,
                             fixer2.replaceNonstandardResidues()
                             fixer2.removeHeterogens(keepWater=False)
                             fixer2.findMissingAtoms()
-                            fixer2.addMissingAtoms()
+                            missing_atoms(fixer2)
                             fixer2.addMissingHydrogens(7.0)
                             with open(output_pdb_path, 'w') as f2:
                                 app.PDBFile.writeFile(fixer2.topology, fixer2.positions, f2, keepIds=True)
@@ -1405,6 +1431,8 @@ def openmm_relax(pdb_file_path, output_pdb_path, use_gpu_relax=True,
                 except Exception:
                     pass
             except Exception as e_f:
+                if strict():
+                    raise
                 print(f"[FASPR] WARN: repack step failed: {e_f}")
 
         # Final alignment and B-factor application (after FASPR)
@@ -1548,6 +1576,8 @@ def openmm_relax(pdb_file_path, output_pdb_path, use_gpu_relax=True,
         return platform_name_used
 
     except Exception as _:
+        if strict():
+            raise
         shutil.copy(pdb_file_path, output_pdb_path)
         gc.collect()
         elapsed_total = time.time() - start_time
@@ -1602,10 +1632,13 @@ def openmm_relax_subprocess(pdb_file_path, output_pdb_path, use_gpu_relax=True, 
     code_parts.append("logging.getLogger('pyrosetta').setLevel(logging.WARNING)")
     code_parts.append("logging.getLogger('pyrosetta.distributed').setLevel(logging.WARNING)")
     code_parts.append("logging.getLogger('pyrosetta.distributed.utility.pickle').setLevel(logging.WARNING)")
+    code_parts.append("from optimizations.runtime import seed_relaxation; seed_relaxation()")
     code_parts.append("from functions.pr_alternative_utils import openmm_relax")
     code_parts.append(
         f"plat = openmm_relax({pdb_file_path!r}, {output_pdb_path!r}, use_gpu_relax={bool(use_gpu_relax)}, use_faspr_repack={bool(use_faspr_repack)})"
-    )    
+    )
+    if strict():
+        code_parts.append("import os; print('[freebindcraft-backend] OpenMM platform=' + str(plat) + ' seed=' + os.environ['FREEBINDCRAFT_RELAX_SEED'])")
     py_code = "; ".join(code_parts)
 
     # Signature to detect soft fallback path inside child (input copied to output)
@@ -1615,7 +1648,8 @@ def openmm_relax_subprocess(pdb_file_path, output_pdb_path, use_gpu_relax=True, 
     for attempt_idx in range(1, attempts + 1):
         # Capture output to inspect for fallback while still forwarding to parent
         proc = subprocess.run(
-            [sys.executable, "-c", py_code], timeout=timeout, capture_output=True, text=True, cwd=cwd
+            [sys.executable, "-c", py_code], timeout=timeout, capture_output=True, text=True,
+            cwd=cwd, env=relaxation_environment(pdb_file_path)
         )
 
         # Forward child output to parent streams to preserve visibility, but filter stderr
@@ -1654,7 +1688,13 @@ def openmm_relax_subprocess(pdb_file_path, output_pdb_path, use_gpu_relax=True, 
             time.sleep(0.5)
             continue
 
-        # Success (or final acceptable fallback)
+        if fallback_signature in combined_out:
+            require_backend(False, "OpenMM exhausted relaxation retries")
+        if strict():
+            require_backend(os.path.isfile(output_pdb_path) and os.path.getsize(output_pdb_path) > 0,
+                            "OpenMM missing output")
+            print("[freebindcraft-backend] OpenMM complete")
+        # Success (or final acceptable fallback in legacy execution)
         return None
 
     return None
