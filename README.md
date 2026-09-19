@@ -46,6 +46,10 @@ For the motivation behind the PyRosetta bypass, implementation details (OpenMM r
 
 ## Installation
 
+For the opt-in, pinned PyRosetta-free `off`, `exact`, and experimental `fast`
+modes, see [ColabDesign acceleration](optimizations/README.md). The installation
+below and its defaults are unchanged.
+
 1.  Clone this modified repository:
     ```bash
     git clone https://github.com/cytokineking/FreeBindCraft [install_folder]
