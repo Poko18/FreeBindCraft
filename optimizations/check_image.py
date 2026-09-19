@@ -11,6 +11,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     assert importlib.util.find_spec("pyrosetta") is None
+    from colabdesign import mk_mpnn_model
+
+    # Exercise loading (not merely importing) the preset's packaged weights.
+    mk_mpnn_model(model_name="v_48_020", weights="soluble")
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         target = ROOT / "example/PDL1.pdb"

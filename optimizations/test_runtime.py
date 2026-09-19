@@ -5,7 +5,9 @@ import json
 import os
 from pathlib import Path
 import signal
+import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -14,6 +16,32 @@ import runtime
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_colabdesign_precedes_gpu_query_and_no_pyrosetta_is_imported(self):
+        import builtins
+
+        events = []
+        original_import = builtins.__import__
+
+        def importing(name, *args, **kwargs):
+            if name == "colabdesign":
+                events.append("colabdesign")
+            if name == "pyrosetta":
+                raise AssertionError("PyRosetta must not be imported")
+            return original_import(name, *args, **kwargs)
+
+        def devices():
+            self.assertIn("colabdesign", events)
+            return [SimpleNamespace(platform="gpu")]
+
+        modules = {"colabdesign": SimpleNamespace(), "jax": SimpleNamespace(devices=devices),
+                   "numpy": SimpleNamespace(random=SimpleNamespace(seed=lambda _: None)),
+                   "freesasa": SimpleNamespace()}
+        with patch.dict(sys.modules, modules), patch.object(builtins, "__import__", importing), \
+             patch.object(run.runpy, "run_path") as launch, patch.object(sys, "argv", []), \
+             patch.object(sys, "path", list(sys.path)):
+            run.child(["--no-pyrosetta"], 42)
+            launch.assert_called_once_with(str(run.ROOT / "bindcraft.py"), run_name="__main__")
+
     def test_seed_and_helper_environment(self):
         with patch.dict(os.environ, {"FREEBINDCRAFT_SEED": "42", "COLABDESIGN_OPT": "fast",
                                      "COLABDESIGN_OPT_LOWERCACHE": "relower",
