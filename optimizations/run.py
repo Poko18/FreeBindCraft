@@ -49,7 +49,9 @@ def inputs(command):
 
 def source_digest():
     digest = hashlib.sha256()
-    for path in sorted([ROOT / "bindcraft.py", *ROOT.glob("functions/*.py"), *ROOT.glob("optimizations/*.py")]):
+    paths = [ROOT / "bindcraft.py", *ROOT.glob("functions/*.py"),
+             ROOT / "optimizations/run.py", ROOT / "optimizations/runtime.py"]
+    for path in sorted(paths):
         digest.update(str(path.relative_to(ROOT)).encode())
         digest.update(path.read_bytes())
     return digest.hexdigest()

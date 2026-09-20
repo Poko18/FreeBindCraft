@@ -6,7 +6,7 @@ RUN mkdir /source && tar -xzf /tmp/source.tar.gz -C /source --strip-components=1
 FROM mambaorg/micromamba:2.1.1
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential ca-certificates wget git bzip2 ocl-icd-libopencl1 clinfo time \
+    build-essential ca-certificates wget git bzip2 ocl-icd-libopencl1 clinfo \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /etc/OpenCL/vendors \
     && echo libnvidia-opencl.so.1 > /etc/OpenCL/vendors/nvidia.icd
@@ -31,7 +31,7 @@ ARG FREEBINDCRAFT_REVISION=local
 ENV FREEBINDCRAFT_REVISION=${FREEBINDCRAFT_REVISION}
 LABEL org.opencontainers.image.source="https://github.com/Poko18/FreeBindCraft" \
       org.opencontainers.image.revision=${FREEBINDCRAFT_REVISION} \
-      org.structor.uplift-revision="f4f62fa6592ae4938d49b1757bea0cfeff9f468e"
+      org.opencontainers.image.description="FreeBindCraft with opt-in ColabDesign acceleration"
 WORKDIR /app
 ENTRYPOINT []
 CMD ["python", "optimizations/run.py", "--help"]

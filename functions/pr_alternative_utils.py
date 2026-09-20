@@ -1263,11 +1263,12 @@ def openmm_relax(pdb_file_path, output_pdb_path, use_gpu_relax=True,
             if md_steps_per_shake > 0 and i_stage_val < 2:
                 t_md_start = time.time()
                 velocity_seed = relaxation_seed()
-                simulation.context.setVelocitiesToTemperature(
-                    300*unit.kelvin,
-                    *((((velocity_seed + i_stage_val) % 2147483646 + 1),)
-                      if velocity_seed is not None else ()),
-                )
+                if velocity_seed is None:
+                    simulation.context.setVelocitiesToTemperature(300*unit.kelvin)
+                else:
+                    simulation.context.setVelocitiesToTemperature(
+                        300*unit.kelvin, (velocity_seed + i_stage_val) % 2147483646 + 1,
+                    )
                 simulation.step(md_steps_per_shake)
                 if _stage_metrics is not None:
                     _stage_metrics["md_steps_run"] = int(md_steps_per_shake)
