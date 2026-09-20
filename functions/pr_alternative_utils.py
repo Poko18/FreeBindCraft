@@ -206,6 +206,12 @@ def _calculate_shape_complementarity(pdb_file_path, binder_chain="B", target_cha
     except subprocess.TimeoutExpired:
         print(f"[SC-RS] ERROR: sc-rs timed out for {os.path.basename(pdb_file_path)}")
     except subprocess.CalledProcessError as e:
+        if (strict() and target_chain == "A"
+                and "No molecular dots generated" in (e.stderr or "")
+                and not hotspot_residues(pdb_file_path, binder_chain)):
+            # Disconnected chains have no interface to complement, not a tool failure.
+            print("[freebindcraft-backend] sc-rs no_interface value=0.0")
+            return 0.0
         print(f"[SC-RS] ERROR running sc-rs: {e}. stderr: {getattr(e, 'stderr', '')}")
     except Exception as e:
         print(f"[SC-RS] WARN: Failed to compute SC for {pdb_file_path}: {e}")
