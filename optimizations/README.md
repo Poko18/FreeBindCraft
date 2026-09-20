@@ -24,8 +24,9 @@ Modes: `off` (default) uses the same pinned environment without kit activation;
 `exact` enables the kit's exact levers; `fast` additionally enables numerical
 changes and is experimental. Exact means ColabDesign computations for identical
 inputs, not identical final designs. Existing OpenMM GPU variability remains even
-with fixed seeds; it can change relaxed structures, interface metrics, and the
-interface residues fixed during downstream MPNN design. Qualify repeated off and
+with fixed seeds. OpenMM changes coordinates, not amino-acid identities. Those
+coordinate changes can alter interface metrics and which sequence positions are
+kept fixed during subsequent MPNN redesign. Qualify repeated off and
 off/exact ColabDesign outputs before relaxation on your GPU. No end-to-end equality
 or speedup is implied by a mode name.
 
