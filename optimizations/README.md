@@ -22,9 +22,12 @@ the original AlphaFold distribution and retain its license and checksums.
 
 Modes: `off` (default) uses the same pinned environment without kit activation;
 `exact` enables the kit's exact levers; `fast` additionally enables numerical
-changes and is experimental. A mode name is not proof of full-pipeline parity:
-qualify repeated off and off/exact runs on your GPU, including OpenMM. No speedup
-or end-to-end equality is promised for an unqualified hardware combination.
+changes and is experimental. Exact means ColabDesign computations for identical
+inputs, not identical final designs. Existing OpenMM GPU variability remains even
+with fixed seeds; it can change relaxed structures, interface metrics, and the
+interface residues fixed during downstream MPNN design. Qualify repeated off and
+off/exact ColabDesign outputs before relaxation on your GPU. No end-to-end equality
+or speedup is implied by a mode name.
 
 The launcher preserves the native pipeline and writes `execution.json` and
 `optimization.log` under `design_path`. It rejects missing/partial activation,
