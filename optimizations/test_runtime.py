@@ -1,12 +1,10 @@
 """Run without scientific dependencies: python -m unittest discover -s optimizations."""
 
 import io
-import ast
 import json
 import os
 from pathlib import Path
 import signal
-import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -18,35 +16,6 @@ import runtime
 
 
 class RuntimeTests(unittest.TestCase):
-    def test_sc_empty_interface_is_not_a_backend_failure(self):
-        # Load only the function so this regression needs no scientific packages.
-        path = run.ROOT / "functions/pr_alternative_utils.py"
-        tree = ast.parse(path.read_text())
-        function = next(node for node in tree.body
-                        if isinstance(node, ast.FunctionDef)
-                        and node.name == "_calculate_shape_complementarity")
-        namespace = dict(__file__=str(path), os=os, subprocess=subprocess, json=json,
-                         time=SimpleNamespace(time=lambda: 0),
-                         shutil=SimpleNamespace(which=lambda _: None),
-                         strict=lambda: True, vprint=lambda _: None,
-                         require_backend=runtime.require_backend)
-        exec(compile(ast.Module(body=[function], type_ignores=[]), str(path), "exec"), namespace)
-        for contacts, error, passes in [({}, "No molecular dots generated", True),
-                                       ({1: "A"}, "No molecular dots generated", False),
-                                       ({}, "Invalid radii file", False)]:
-            namespace["hotspot_residues"] = lambda *_, value=contacts: value
-            failure = subprocess.CalledProcessError(1, ["sc"], stderr=error)
-            with patch.dict(os.environ, {"FREEBINDCRAFT_STRICT": "1"}), \
-                 patch.object(os.path, "isfile", return_value=True), \
-                 patch.object(os, "access", return_value=True), \
-                 patch.object(subprocess, "run", side_effect=failure):
-                score = namespace["_calculate_shape_complementarity"]
-                if passes:
-                    self.assertEqual(score("complex.pdb"), 0.0)
-                else:
-                    with self.assertRaises(RuntimeError):
-                        score("complex.pdb")
-
     def test_colabdesign_precedes_gpu_query_and_no_pyrosetta_is_imported(self):
         import builtins
 

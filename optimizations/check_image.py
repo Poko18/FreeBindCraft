@@ -2,9 +2,12 @@
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -15,6 +18,22 @@ def main():
 
     # Exercise loading (not merely importing) the preset's packaged weights.
     mk_mpnn_model(model_name="v_48_020", weights="soluble")
+    sys.path.insert(0, str(ROOT))
+    from functions import pr_alternative_utils as scoring
+
+    for contacts, error, passes in [({}, "No molecular dots generated", True),
+                                   ({1: "A"}, "No molecular dots generated", False),
+                                   ({}, "Invalid radii file", False)]:
+        failure = subprocess.CalledProcessError(1, ["sc"], stderr=error)
+        with patch.dict(os.environ, {"FREEBINDCRAFT_STRICT": "1"}), \
+             patch.object(scoring, "hotspot_residues", return_value=contacts), \
+             patch.object(subprocess, "run", side_effect=failure):
+            try:
+                value = scoring._calculate_shape_complementarity("complex.pdb")
+            except RuntimeError:
+                assert not passes
+            else:
+                assert passes and value == 0.0
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         target = ROOT / "example/PDL1.pdb"
